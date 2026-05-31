@@ -1,0 +1,39 @@
+### 1. Login — obtener JWT
+POST http://localhost:8080/api/auth/login
+Content-Type: application/json
+
+{
+  "username": "pbogado",
+  "password": "matibebe"
+}
+
+### --- Copiar el token de la respuesta y pegarlo en @token abajo ---
+@token = eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwYm9nYWRvIiwiaWF0IjoxNzgwMTg2MTQzLCJleHAiOjE3ODAyNzI1NDN9.m5fBzH2WCWxWDwHAKq1OMQ5pLviOgNoOIEmujzjxHjA
+
+### 2. Todos los artículos (paginado)
+GET http://localhost:8080/api/stock?page=0&size=50
+Authorization: Bearer {{token}}
+
+### 3. Por artículo (todas las sucursales)
+GET http://localhost:8080/api/stock/articulo/00001?page=0&size=20
+Authorization: Bearer {{token}}
+
+### 4. Por familia
+GET http://localhost:8080/api/stock/familia/006?page=0&size=20
+Authorization: Bearer {{token}}
+
+### 5. Por línea
+GET http://localhost:8080/api/stock/linea/00001?page=0&size=20
+Authorization: Bearer {{token}}
+
+### 6. Búsqueda por nombre (mín. 2 caracteres)
+GET http://localhost:8080/api/stock/search?nombre=uhu&page=0&size=20
+Authorization: Bearer {{token}}
+
+### 7. Opciones de filtro — familias y líneas distintas
+GET http://localhost:8080/api/stock/opciones
+Authorization: Bearer {{token}}
+
+### 8. Imagen de artículo (binario JPEG)
+GET http://localhost:8080/api/articulos/00025/imagen
+Authorization: Bearer {{token}}

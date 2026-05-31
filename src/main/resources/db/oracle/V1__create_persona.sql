@@ -1,0 +1,1 @@
+-- archivo eliminado: era scaffold de ejemplo, reemplazado por el dominio real
