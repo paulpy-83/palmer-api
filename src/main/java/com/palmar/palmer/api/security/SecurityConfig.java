@@ -3,18 +3,16 @@ package com.palmar.palmer.api.security;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.core.userdetails.User;
-import org.springframework.security.core.userdetails.UserDetailsService;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.security.provisioning.InMemoryUserDetailsManager;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -27,24 +25,8 @@ import java.util.List;
 @EnableWebSecurity
 public class SecurityConfig {
 
-    @Value("${app.security.user}")
-    private String appUser;
-
-    @Value("${app.security.password}")
-    private String appPassword;
-
     @Value("${app.cors.allowed-origins}")
     private String allowedOrigins;
-
-    @Bean
-    public UserDetailsService userDetailsService(PasswordEncoder passwordEncoder) {
-        var user = User.builder()
-                .username(appUser)
-                .password(passwordEncoder.encode(appPassword))
-                .roles("USER")
-                .build();
-        return new InMemoryUserDetailsManager(user);
-    }
 
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http, JwtAuthFilter jwtAuthFilter) throws Exception {
@@ -52,10 +34,16 @@ public class SecurityConfig {
             .csrf(AbstractHttpConfigurer::disable)
             .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .authorizeHttpRequests(authz -> authz
+                    // Rutas de API públicas
                     .requestMatchers("/api/auth/**").permitAll()
-                    .anyRequest().authenticated())
+                    // Rutas de API protegidas
+                    .requestMatchers("/api/**").authenticated()
+                    // Todo lo demás (estáticos + rutas SPA) es público
+                    .anyRequest().permitAll())
             .sessionManagement(session -> session
                 .sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .exceptionHandling(ex -> ex
+                .authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
             .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
@@ -83,6 +71,18 @@ public class SecurityConfig {
 
     @Bean
     public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();
+        // Claves almacenadas en texto plano en mayúsculas en USUARIOS.CLAVE_AUTORIZACION.
+        // Migrar a BCryptPasswordEncoder cuando se hasheen las claves en la BD.
+        return new PasswordEncoder() {
+            @Override
+            public String encode(CharSequence raw) {
+                return raw.toString().toUpperCase();
+            }
+
+            @Override
+            public boolean matches(CharSequence raw, String encoded) {
+                return raw.toString().toUpperCase().equals(encoded);
+            }
+        };
     }
 }

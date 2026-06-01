@@ -1,4 +1,5 @@
 server:
+  port: 8282
   error:
     include-message: never
     include-exception: false
@@ -43,9 +44,6 @@ spring:
           fetch_size: 100
 
 app:
-  security:
-    user: ${APP_USER}
-    password: ${APP_PASSWORD}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:5174,http://10.30.1.*:5173,http://10.30.2.*:5173,http://10.30.3.*:5173,http://10.30.4.*:5173,http://10.30.5.*:5173}
 
