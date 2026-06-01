@@ -1,10 +1,10 @@
 ### 1. Login — obtener JWT
-POST http://localhost:8080/api/auth/login
+POST http://localhost:8282/api/auth/login
 Content-Type: application/json
 
 {
   "username": "pbogado",
-  "password": "matibebe"
+  "password": "matibebe270983"
 }
 
 ### --- Copiar el token de la respuesta y pegarlo en @token abajo ---
