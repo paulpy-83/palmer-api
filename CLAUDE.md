@@ -50,18 +50,21 @@ src/main/java/com/palmar/palmer/api/
 │   └── ErrorResponseDTO.java
 ├── entity/
 │   ├── ArticuloStockView.java         — @Immutable, mapea la vista VW_ARTICULOS_REST_API
-│   └── ArticuloStockViewId.java       — clave compuesta (codArticulo + codSucursal)
+│   ├── ArticuloStockViewId.java       — clave compuesta (codArticulo + codSucursal)
+│   └── Usuario.java                   — @Immutable, mapea la tabla USUARIOS (autenticación)
 ├── exception/
 │   ├── GlobalExceptionHandler.java
 │   └── ResourceNotFoundException.java
 ├── mapper/
 │   └── ArticuloStockViewMapper.java
 ├── repository/
-│   └── ArticuloStockViewRepository.java — JpaRepository + JPQL para búsqueda y opciones de filtro
+│   ├── ArticuloStockViewRepository.java — JpaRepository + JPQL para búsqueda y opciones de filtro
+│   └── UsuarioRepository.java           — JpaRepository<Usuario>, findByCodUsuarioAndEstado
 ├── security/
-│   ├── JwtUtil.java                   — generación y validación de tokens JWT (jjwt 0.12.6)
+│   ├── JwtUtil.java                   — generación y validación de tokens JWT (jjwt 0.12.6); claim "roles"
 │   ├── JwtAuthFilter.java             — OncePerRequestFilter para validar Bearer token
-│   └── SecurityConfig.java           — filtro STATELESS, CORS, InMemoryUserDetailsManager
+│   ├── AppUserDetailsService.java     — UserDetailsService que carga usuarios desde Oracle (USUARIOS)
+│   └── SecurityConfig.java           — filtro STATELESS, CORS, PasswordEncoder (uppercase)
 └── service/
     ├── ArticuloStockViewService.java  — @Transactional(readOnly=true), orquesta repo + mapper
     └── SambaService.java              — conexión SMB2 persistente con pool (ReentrantLock), caché Caffeine
@@ -72,7 +75,7 @@ src/main/java/com/palmar/palmer/api/
 ### Auth (pública)
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| POST | `/api/auth/login` | Retorna JWT token |
+| POST | `/api/auth/login` | Retorna JWT token + `username` + `roles` |
 
 ### Imágenes (requiere `Authorization: Bearer <token>`)
 | Método | Ruta | Descripción |
@@ -94,6 +97,15 @@ src/main/java/com/palmar/palmer/api/
 Paginación por defecto: `size=20`, `sort=codArticulo,ASC`. Soporta params `?page=&size=&sort=`.
 
 ## DTOs
+
+### LoginResponseDTO
+Respuesta de `POST /api/auth/login`.
+
+| Campo | Tipo | Descripción |
+|-------|------|-------------|
+| `token` | String | JWT Bearer token |
+| `username` | String | Nombre de usuario autenticado |
+| `roles` | `List<String>` | Roles del usuario (ej. `["ROLE_USER"]`) |
 
 ### ArticuloStockViewDTO
 Respuesta de endpoints de detalle y listado paginado (`/api/stock/**`).
@@ -176,7 +188,11 @@ Variables de entorno para ajustar TTL y tamaño sin recompilar:
 ## Security
 
 - Autenticación **stateless** con JWT (Bearer token)
-- Usuario único configurado via env vars (`APP_USER` / `APP_PASSWORD`) — `InMemoryUserDetailsManager`
+- Usuarios cargados desde la tabla Oracle `USUARIOS` via `AppUserDetailsService`
+  - Solo usuarios con `ESTADO = 'A'` (activos) pueden autenticarse
+  - El rol se toma de la columna `COD_GRUPO` → `SimpleGrantedAuthority(codGrupo)`
+  - Contraseñas almacenadas en mayúsculas en `CLAVE_AUTORIZACION`; `PasswordEncoder` convierte a uppercase antes de comparar
+- El JWT incluye `subject` (username) y el claim `"roles"` (lista de authorities)
 - Ruta pública: `/api/auth/**`; el resto requiere token válido
 - CORS configurable via `CORS_ALLOWED_ORIGINS` (default: `localhost:5173,5174`)
 
@@ -208,8 +224,6 @@ src/main/resources/
 | `DB_USERNAME` | si | — | Usuario DB |
 | `DB_PASSWORD` | si | — | Contraseña DB |
 | `DB_SCHEMA` | si | — | Schema Oracle (ej. `PALMER`) |
-| `APP_USER` | si | — | Usuario de la API |
-| `APP_PASSWORD` | si | — | Contraseña de la API |
 | `JWT_SECRET` | si | — | Clave secreta JWT (HS256) |
 | `JWT_EXPIRATION_MS` | no | `86400000` | Expiración JWT en ms (24h) |
 | `CORS_ALLOWED_ORIGINS` | no | `http://localhost:5173,http://localhost:5174` | Orígenes CORS |
