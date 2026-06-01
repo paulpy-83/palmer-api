@@ -1,6 +1,5 @@
 package com.palmar.palmer.api.dto;
 
-public record LoginResponseDTO(String token) {
+import java.util.List;
 
-
-}
+public record LoginResponseDTO(String token, String username, List<String> roles) {}
