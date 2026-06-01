@@ -1,5 +1,6 @@
 spring:
   datasource:
+    url: jdbc:oracle:thin:@//10.30.1.3:1521/palmar
     hikari:
       maximum-pool-size: 5
       minimum-idle: 1
@@ -9,6 +10,7 @@ spring:
     properties:
       hibernate:
         format_sql: true
+        default_schema: INV
 
 logging:
   level:
@@ -16,3 +18,9 @@ logging:
     org.hibernate.orm.jdbc.bind: TRACE
     org.springframework.web: DEBUG
     com.palmar: DEBUG
+
+samba:
+  host: 10.30.1.3
+  share: imagenes
+  folder: /empresa_1
+  domain: WORKGROUP

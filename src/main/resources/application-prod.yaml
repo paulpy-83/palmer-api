@@ -1,5 +1,6 @@
 spring:
   datasource:
+    url: jdbc:oracle:thin:@//${DB_HOST}:${DB_PORT}/${DB_SERVICE}
     hikari:
       maximum-pool-size: 20
       minimum-idle: 5
@@ -9,6 +10,7 @@ spring:
     properties:
       hibernate:
         format_sql: false
+        default_schema: ${DB_SCHEMA}
         jdbc:
           fetch_size: 500
 
@@ -16,3 +18,9 @@ logging:
   level:
     root: WARN
     com.palmar: INFO
+
+samba:
+  host: ${SAMBA_HOST}
+  share: ${SAMBA_SHARE}
+  folder: ${SAMBA_FOLDER}
+  domain: ${SAMBA_DOMAIN}

@@ -177,13 +177,10 @@ Respuesta de `GET /api/stock/opciones`. Listas de valores distintos para poblar 
 
 | Cache | Key | TTL | Max entradas | Propósito |
 |-------|-----|-----|--------------|-----------|
-| `imagenes` | filename | 24h (configurable) | 500 (configurable) | Bytes de imágenes descargadas desde Samba |
-| `opciones-filtro` | — | 6h (configurable) | 1 | Familias y líneas distintas para filtros |
+| `imagenes` | filename | 24h | 500 | Bytes de imágenes descargadas desde Samba |
+| `opciones-filtro` | — | 6h | 1 | Familias y líneas distintas para filtros |
 
-Variables de entorno para ajustar TTL y tamaño sin recompilar:
-- `CACHE_IMAGENES_TTL_HORAS` (default: 24)
-- `CACHE_IMAGENES_MAX_ENTRADAS` (default: 500)
-- `CACHE_OPCIONES_TTL_HORAS` (default: 6)
+TTL y tamaño fijos en `application.yaml` (`cache.imagenes.*`, `cache.opciones.*`).
 
 ## Security
 
@@ -194,7 +191,7 @@ Variables de entorno para ajustar TTL y tamaño sin recompilar:
   - Contraseñas almacenadas en mayúsculas en `CLAVE_AUTORIZACION`; `PasswordEncoder` convierte a uppercase antes de comparar
 - El JWT incluye `subject` (username) y el claim `"roles"` (lista de authorities)
 - Ruta pública: `/api/auth/**`; el resto requiere token válido
-- CORS configurable via `CORS_ALLOWED_ORIGINS` (default: `localhost:5173,5174`)
+- CORS configurable via `CORS_ALLOWED_ORIGINS` (variable de entorno, requerida)
 
 ## Compresión HTTP
 
@@ -207,38 +204,38 @@ Habilitada en todos los perfiles (`application.yaml` base):
 
 ```
 src/main/resources/
-├── application.yaml          — config base (datasource, JPA, security, CORS, JWT, cache, compresión)
-├── application-dev.yaml      — pool reducido, SQL debug habilitado
-├── application-prod.yaml     — pool ampliado, fetch_size=500, logs reducidos
+├── application.yaml          — valores fijos (JWT 1h, caché TTL/max), compresión, credenciales via ${...}
+├── application-dev.yaml      — infraestructura dev (DB url, schema INV, Samba 10.30.1.3), pool reducido, SQL debug
+├── application-prod.yaml     — infraestructura prod via ${ENV_VAR}, pool ampliado, fetch_size=500, logs reducidos
 └── db/oracle/
     └── V1__create_persona.sql
 ```
 
+### Estrategia de configuración
+
+| Tipo | Dónde |
+|------|-------|
+| Secretos (`DB_PASSWORD`, `JWT_SECRET`, `SAMBA_PASSWORD`, etc.) | `.env` (nunca commiteado) |
+| Infraestructura por ambiente (DB url, schema, Samba host/share) | `application-{dev\|prod}.yaml` |
+| Valores fijos no sensibles (JWT expiration, caché TTL/max) | `application.yaml` base |
+
 ## Environment Variables
 
-| Variable | Requerida | Default | Descripción |
-|----------|-----------|---------|-------------|
-| `DB_HOST` | si | — | Host Oracle |
-| `DB_PORT` | si | — | Puerto Oracle |
-| `DB_SERVICE` | si | — | Service name Oracle |
-| `DB_USERNAME` | si | — | Usuario DB |
-| `DB_PASSWORD` | si | — | Contraseña DB |
-| `DB_SCHEMA` | si | — | Schema Oracle (ej. `PALMER`) |
-| `JWT_SECRET` | si | — | Clave secreta JWT (HS256) |
-| `JWT_EXPIRATION_MS` | no | `86400000` | Expiración JWT en ms (24h) |
-| `CORS_ALLOWED_ORIGINS` | no | `http://localhost:5173,http://localhost:5174` | Orígenes CORS |
-| `SPRING_PROFILES_ACTIVE` | no | `dev` | Perfil activo |
-| `SAMBA_HOST` | si | — | Host del servidor Samba/Windows |
-| `SAMBA_SHARE` | si | — | Nombre del share SMB (ej. `imagenes`) |
-| `SAMBA_FOLDER` | no | `` | Subcarpeta dentro del share |
-| `SAMBA_USER` | si | — | Usuario para autenticar en el share |
-| `SAMBA_PASSWORD` | si | — | Contraseña del usuario Samba |
-| `SAMBA_DOMAIN` | no | `WORKGROUP` | Dominio Windows para autenticación NTLM |
-| `CACHE_IMAGENES_TTL_HORAS` | no | `24` | TTL del caché de imágenes en horas |
-| `CACHE_IMAGENES_MAX_ENTRADAS` | no | `500` | Máximo de imágenes en caché |
-| `CACHE_OPCIONES_TTL_HORAS` | no | `6` | TTL del caché de opciones de filtro en horas |
+Solo secretos y control de entorno. Los valores de infraestructura (DB url, schema, Samba host/share/domain) se definen en los YAMLs de perfil.
 
-En desarrollo local se puede usar un archivo `.env` en la raíz del proyecto (cargado por `dotenv-java`).
+| Variable | Descripción |
+|----------|-------------|
+| `SPRING_PROFILES_ACTIVE` | Perfil activo (`dev` \| `prod`) |
+| `DB_USERNAME` | Usuario Oracle |
+| `DB_PASSWORD` | Contraseña Oracle |
+| `JWT_SECRET` | Clave secreta JWT (HS256) — generar con `openssl rand -base64 32` |
+| `CORS_ALLOWED_ORIGINS` | Orígenes CORS separados por coma (ej. `http://localhost:5173`) |
+| `SAMBA_USER` | Usuario para autenticar en el share SMB |
+| `SAMBA_PASSWORD` | Contraseña del usuario Samba |
+
+En desarrollo local definir estas variables en `.env` en la raíz del proyecto (cargado por `dotenv-java`).
+
+En producción `DB_HOST`, `DB_PORT`, `DB_SERVICE`, `DB_SCHEMA`, `SAMBA_HOST`, `SAMBA_SHARE`, `SAMBA_FOLDER`, `SAMBA_DOMAIN` deben setearse como variables de entorno reales del servidor (referenciadas en `application-prod.yaml`).
 
 ## Samba / Imágenes
 
