@@ -31,6 +31,10 @@
         <ojdbc11.version>23.7.0.25.01</ojdbc11.version>
         <jjwt.version>0.12.6</jjwt.version>
         <smbj.version>0.13.0</smbj.version>
+        <frontend-maven-plugin.version>1.15.1</frontend-maven-plugin.version>
+        <node.version>v24.16.0</node.version>
+        <npm.version>11.13.0</npm.version>
+        <frontend.dir>${project.basedir}/../palmer</frontend.dir>
     </properties>
     <dependencies>
         <dependency>
@@ -182,5 +186,74 @@
             </plugin>
         </plugins>
     </build>
+
+    <!-- ══════════════════════════════════════════════════════════════
+         Perfil de producción: incluye build + copia del frontend
+         Uso: mvnw.cmd clean package -Pprod
+         ══════════════════════════════════════════════════════════════ -->
+    <profiles>
+        <profile>
+            <id>prod</id>
+            <build>
+                <plugins>
+                    <!-- 1. Build del frontend -->
+                    <plugin>
+                        <groupId>com.github.eirslett</groupId>
+                        <artifactId>frontend-maven-plugin</artifactId>
+                        <version>${frontend-maven-plugin.version}</version>
+                        <configuration>
+                            <workingDirectory>${frontend.dir}</workingDirectory>
+                            <nodeVersion>${node.version}</nodeVersion>
+                            <npmVersion>${npm.version}</npmVersion>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>install-node-and-npm</id>
+                                <goals><goal>install-node-and-npm</goal></goals>
+                                <phase>generate-resources</phase>
+                            </execution>
+                            <execution>
+                                <id>npm-install</id>
+                                <goals><goal>npm</goal></goals>
+                                <phase>generate-resources</phase>
+                                <configuration>
+                                    <arguments>install</arguments>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>npm-build</id>
+                                <goals><goal>npm</goal></goals>
+                                <phase>generate-resources</phase>
+                                <configuration>
+                                    <arguments>run build</arguments>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+
+                    <!-- 2. Copiar dist/ → static/ dentro del JAR -->
+                    <plugin>
+                        <artifactId>maven-resources-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>copy-frontend</id>
+                                <phase>process-resources</phase>
+                                <goals><goal>copy-resources</goal></goals>
+                                <configuration>
+                                    <outputDirectory>${project.build.outputDirectory}/static</outputDirectory>
+                                    <resources>
+                                        <resource>
+                                            <directory>${frontend.dir}/dist</directory>
+                                            <filtering>false</filtering>
+                                        </resource>
+                                    </resources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
 </project>
