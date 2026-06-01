@@ -68,7 +68,7 @@ public class SambaService {
      * Reutiliza la conexión SMB persistente; reconecta automáticamente si cayó.
      * TTL y tamaño máximo configurables via cache.imagenes.* en application.yaml.
      */
-    @Cacheable(value = "imagenes", key = "#filename", unless = "#result == null || !#result.isPresent() || #result.get().length == 0")
+    @Cacheable(value = "imagenes", key = "#filename", unless = "#result == null || #result.length == 0")
     public Optional<byte[]> fetchImage(String filename) {
         String remotePath = buildRemotePath(filename);
         log.debug("Cache miss — descargando imagen desde Samba: '{}'", remotePath);
