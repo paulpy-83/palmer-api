@@ -42,7 +42,7 @@ src/main/java/com/palmar/palmer/api/
 │   ├── CacheConfig.java        — Caffeine (imagenes, opciones-filtro, alertas)
 │   └── SambaProperties.java    — @ConfigurationProperties(prefix="samba")
 ├── controller/
-│   ├── AuthController.java           — POST /api/auth/login
+│   ├── AuthController.java           — POST /api/auth/login, POST /api/auth/logout
 │   ├── PalmerDashboardController.java — /api/v2/stock/**
 │   ├── PalmerArticuloController.java  — /api/v2/articulos/**
 │   ├── PalmerAlertaController.java    — /api/v2/alertas
@@ -262,7 +262,7 @@ Todos los TTL configurables en `application.yaml` (`cache.*.ttl-*`).
 
 ## Security
 
-- JWT stateless; `/api/auth/**` pública; todo `/api/**` requiere Bearer token. Expiración: **15 minutos** (`jwt.expiration-ms: 900000`)
+- JWT stateless; `/api/auth/**` pública; todo `/api/**` requiere Bearer token. Expiración: **1 hora** (`jwt.expiration-ms: 3600000`)
 - Regla `requestMatchers("/api/**")` cubre tanto `/api/*` como `/api/v2/**`
 - **Autenticación:** `OracleAuthenticationProvider` valida credenciales directamente contra el motor Oracle via `DriverManager.getConnection(dbUrl, props)` con timeout de 5 s (`auth.datasource.connection-timeout`). Si la conexión tiene éxito, verifica que el usuario exista en `USUARIOS` con `ESTADO='A'` y carga el rol desde `COD_GRUPO`. La conexión se abre y cierra inmediatamente (try-with-resources) — no se mantiene ningún pool por usuario.
 - **AuthenticationManager:** `ProviderManager` explícito con `OracleAuthenticationProvider` como único proveedor. Solo interviene en el login — los requests JWT no pasan por aquí.
@@ -322,6 +322,21 @@ POST /api/auth/logout  (Authorization: Bearer <token>)
 | TTL | Tiempo restante del JWT al momento del logout |
 | Comportamiento si Redis no disponible | App falla al iniciar (dependencia requerida) |
 | Crecimiento de la blacklist | Acotado — las entradas expiran con el JWT |
+
+`spring.data.redis.repositories.enabled: false` en `application.yaml` — desactiva el auto-scan de repositorios Redis. La app solo usa `StringRedisTemplate` directamente; sin esta propiedad Spring Data Redis emite warnings al iniciar por cada repositorio JPA.
+
+## Logging de seguridad
+
+`JwtAuthFilter`, `TokenBlacklistService` y `AuthController` tienen `@Slf4j` con logs DEBUG permanentes:
+
+| Prefijo | Clase | Qué registra |
+|---------|-------|--------------|
+| `[AUTH-LOGIN]` | `AuthController` | Intento de login, token generado con `jti` y roles |
+| `[AUTH-LOGOUT]` | `AuthController` | Header recibido, `user`, `jti`, TTL, decisión de blacklistear |
+| `[BLACKLIST]` | `TokenBlacklistService` | Clave Redis exacta + TTL en cada `SET`; resultado en cada `CHECK` |
+| `[JWT-FILTER]` | `JwtAuthFilter` | Cada request: método+URI, username extraído, `jti`, resultado blacklist, auth seteada |
+
+Activos con `com.palmar: DEBUG` ya configurado en `application-dev.yaml`.
 
 ## Estrategia de configuración
 
@@ -403,6 +418,20 @@ IPs: `10.30.1.3` (prod OL8), `10.30.1.6`, `10.30.2.18` (dev). Vence 1 sep 2028.
 - Sección **Reposición desde depósito** — `BranchCard` por sucursal con badges crítico/bajo
 - Sección **Requieren compra** — card única con lista plana de artículos del depósito
 - Generación PDF via `src/lib/pdf-reports.js` (`generarPDFReposicion`, `generarPDFCompra`)
+
+### AuthContext — pitfall del logout
+
+`AuthContext.logout(expired = false)` **nunca debe pasarse directamente como `onClick`**:
+
+```jsx
+// MAL — React pasa el SyntheticEvent como `expired` (truthy) → apiLogout nunca se llama
+<button onClick={logout}>
+
+// BIEN
+<button onClick={() => logout()}>
+```
+
+Si `expired` recibe un `SyntheticEvent`, el guard `if (!expired && tokenRef.current)` falla y el token no se revoca en el backend. El usuario es redirigido a `/login` de todas formas, pero la sesión sigue activa en Redis.
 
 ### Iconos relevantes (`src/components/ui/icons.jsx`)
 | Ícono | Uso |

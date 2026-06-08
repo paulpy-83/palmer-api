@@ -31,6 +31,8 @@ spring:
       port: ${REDIS_PORT:6379}
       password: ${REDIS_PASSWORD:}
       database: ${REDIS_DB:0}
+      repositories:
+        enabled: false
 
   datasource:
     username: ${DB_USERNAME}
@@ -55,7 +57,7 @@ app:
 
 jwt:
   secret: ${JWT_SECRET}
-  expiration-ms: 900000
+  expiration-ms: 3600000
 
 samba:
   user: ${SAMBA_USER}
