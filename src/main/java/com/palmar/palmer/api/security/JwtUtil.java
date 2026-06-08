@@ -11,9 +11,12 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
+import java.time.Duration;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 @Component
 public class JwtUtil {
@@ -33,6 +36,7 @@ public class JwtUtil {
                 .map(GrantedAuthority::getAuthority)
                 .toList();
         return Jwts.builder()
+                .id(UUID.randomUUID().toString())
                 .subject(userDetails.getUsername())
                 .claim("roles", roles)
                 .issuedAt(new Date())
@@ -54,6 +58,21 @@ public class JwtUtil {
         } catch (JwtException | IllegalArgumentException ignored) {
         }
         return Optional.empty();
+    }
+
+    @SuppressWarnings("unchecked")
+    public List<String> extractRoles(String token) {
+        List<String> roles = (List<String>) parseClaims(token).get("roles", List.class);
+        return roles != null ? roles : Collections.emptyList();
+    }
+
+    public String extractJti(String token) {
+        return parseClaims(token).getId();
+    }
+
+    public Duration extractRemainingTtl(String token) {
+        long remaining = parseClaims(token).getExpiration().getTime() - System.currentTimeMillis();
+        return remaining > 0 ? Duration.ofMillis(remaining) : Duration.ZERO;
     }
 
     private Claims parseClaims(String token) {

@@ -5,7 +5,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
-import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
+import org.springframework.security.authentication.ProviderManager;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
@@ -65,13 +65,19 @@ public class SecurityConfig {
     }
 
     @Bean
-    public AuthenticationManager authenticationManager(AuthenticationConfiguration config) throws Exception {
-        return config.getAuthenticationManager();
+    public AuthenticationManager authenticationManager(OracleAuthenticationProvider oracleProvider) {
+        // ProviderManager exclusivo para el login (POST /api/auth/login).
+        // Requests autenticados son procesados por JwtAuthFilter desde los claims del JWT,
+        // sin consultar la BD ni pasar por este AuthenticationManager.
+        return new ProviderManager(oracleProvider);
     }
 
     @Bean
     public PasswordEncoder passwordEncoder() {
         // Claves almacenadas en texto plano en mayúsculas en USUARIOS.CLAVE_AUTORIZACION.
+        // Este encoder ya no participa en el login (OracleAuthenticationProvider valida
+        // contra el motor Oracle). Se mantiene para compatibilidad con otros componentes
+        // de Spring Security que puedan requerirlo.
         // Migrar a BCryptPasswordEncoder cuando se hasheen las claves en la BD.
         return new PasswordEncoder() {
             @Override
