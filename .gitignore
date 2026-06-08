@@ -37,6 +37,8 @@ build/
 .claude/
 Lib/
 *.log
+Pruebas_dev.http
+Pruebas_prod.http
 
 ### SSL ###
 src/main/resources/palmer.p12
