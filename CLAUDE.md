@@ -76,7 +76,7 @@ src/main/java/com/palmar/palmer/api/
 │   └── UsuarioRepository
 ├── security/
 │   ├── JwtUtil / JwtAuthFilter / OracleAuthenticationProvider / SecurityConfig
-│   └── AppUserDetailsService  — ⚠ código muerto (no invocado en el flujo actual)
+│   └── TokenBlacklistService  — Redis blacklist por JTI para revocación de JWT
 └── service/
     ├── PalmerDashboardService   — findAll, filtros, search, getOpciones (@Cacheable)
     ├── PalmerArticuloService    — findDetalle + findSucursales + findImagenFilename
@@ -128,9 +128,10 @@ antes de mapear, para prevenir NPE por filas null que Hibernate puede generar co
 ## REST API Endpoints
 
 ### Auth (pública)
-| Método | Ruta |
-|--------|------|
-| POST | `/api/auth/login` |
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| POST | `/api/auth/login` | Obtener JWT |
+| POST | `/api/auth/logout` | Revocar JWT actual → 204 |
 
 ### Stock — VW_PALMER_DASHBOARD
 | Método | Ruta | Descripción |
@@ -265,37 +266,62 @@ Todos los TTL configurables en `application.yaml` (`cache.*.ttl-*`).
 - Regla `requestMatchers("/api/**")` cubre tanto `/api/*` como `/api/v2/**`
 - **Autenticación:** `OracleAuthenticationProvider` valida credenciales directamente contra el motor Oracle via `DriverManager.getConnection(dbUrl, props)` con timeout de 5 s (`auth.datasource.connection-timeout`). Si la conexión tiene éxito, verifica que el usuario exista en `USUARIOS` con `ESTADO='A'` y carga el rol desde `COD_GRUPO`. La conexión se abre y cierra inmediatamente (try-with-resources) — no se mantiene ningún pool por usuario.
 - **AuthenticationManager:** `ProviderManager` explícito con `OracleAuthenticationProvider` como único proveedor. Solo interviene en el login — los requests JWT no pasan por aquí.
-- **AppUserDetailsService:** **Código muerto** — no es invocado por ningún componente activo. `JwtAuthFilter` construye el `Authentication` directamente desde los claims del JWT (username + roles) sin consultar la BD. Candidato a eliminar o reproponer.
+- **JWT Blacklist:** `TokenBlacklistService` escribe el claim `jti` (UUID) en Redis con TTL = tiempo restante del token al momento del logout. `JwtAuthFilter` consulta la blacklist en cada request antes de setear el `SecurityContext`. Las entradas expiran solas — la blacklist no crece indefinidamente.
 - `PasswordEncoder` actual: uppercase (texto plano) — ya no participa en el login. **Pendiente migrar a BCrypt.**
 - CORS via `CORS_ALLOWED_ORIGINS` (todos con `https://`)
 
-### OracleAuthenticationProvider — flujo
+### Flujos de autenticación
+
 ```
+LOGIN
 POST /api/auth/login
   → OracleAuthenticationProvider.authenticate()
   → username.toUpperCase()
   → DriverManager.getConnection(auth.datasource.url, {user, password, CONNECT_TIMEOUT=5s})
       ← ORA-01017 / ORA-28000 → BadCredentialsException → 401
       ← error inesperado → InternalAuthenticationServiceException → 500
-      ← OK → misma conexión abierta, se ejecuta SELECT en USUARIOS:
-              SELECT COD_USUARIO, COD_GRUPO, CLAVE_AUTORIZACION
+      ← OK → SELECT COD_USUARIO, COD_GRUPO, CLAVE_AUTORIZACION
               FROM DB_SCHEMA.USUARIOS WHERE COD_USUARIO = ? AND ESTADO = 'A'
               ← sin fila → DisabledException → 401
               ← con fila → UsuarioInfo{codUsuario, codGrupo, claveAutorizacion}
       (conexión se cierra al salir del try-with-resources)
-  → UserDetails{username=COD_USUARIO, roles=[COD_GRUPO], password=CLAVE_AUTORIZACION}
-  → UsernamePasswordAuthenticationToken(userDetails, null, [COD_GRUPO])
-  → AuthController: jwtUtil.generateToken(userDetails) → JWT{sub, roles, exp=now+15m}
+  → UserDetails{username=COD_USUARIO, roles=[COD_GRUPO]}
+  → jwtUtil.generateToken() → JWT{jti=UUID, sub, roles, iat, exp=now+15m}
   → LoginResponseDTO{token, username, roles} → 200
 
 Prerequisito: GRANT SELECT ON DB_SCHEMA.USUARIOS TO <cada usuario Oracle de la app>
-OracleAuthenticationProvider NO depende de UsuarioRepository (eliminado del provider).
 
-Requests autenticados (JwtAuthFilter — sin consultar BD):
-  → extractValidUsername(token) → COD_USUARIO (desde claim "sub")
-  → extractRoles(token) → [COD_GRUPO] (desde claim "roles")
-  → UsernamePasswordAuthenticationToken(username, null, authorities) en SecurityContext
+REQUEST AUTENTICADO
+GET /api/v2/**  (Authorization: Bearer <token>)
+  → JwtAuthFilter
+      → extractValidUsername(token) → COD_USUARIO ✓ (firma + expiración)
+      → extractJti(token) → UUID
+      → tokenBlacklistService.isBlacklisted(jti)
+          ← true  → no setea SecurityContext → request sin auth → 401
+          ← false → extractRoles(token) → [COD_GRUPO]
+                  → UsernamePasswordAuthenticationToken en SecurityContext
+  → Controller procesa → 200
+
+LOGOUT
+POST /api/auth/logout  (Authorization: Bearer <token>)
+  → AuthController.logout()
+      → extractJti(token) → UUID
+      → extractRemainingTtl(token) → Duration
+      → tokenBlacklistService.blacklist(jti, ttl)
+      → Redis: SET "jti:blacklist:{UUID}" "" EX {segundos restantes}
+  → 204 No Content
+  (token inválido o expirado → JwtException silenciado → 204 igualmente)
 ```
+
+## Redis / JWT Blacklist
+
+| Propiedad | Valor |
+|-----------|-------|
+| Implementación | `TokenBlacklistService` — `StringRedisTemplate` |
+| Clave Redis | `jti:blacklist:{UUID}` |
+| TTL | Tiempo restante del JWT al momento del logout |
+| Comportamiento si Redis no disponible | App falla al iniciar (dependencia requerida) |
+| Crecimiento de la blacklist | Acotado — las entradas expiran con el JWT |
 
 ## Estrategia de configuración
 
@@ -321,6 +347,10 @@ Requests autenticados (JwtAuthFilter — sin consultar BD):
 | `SSL_KEYSTORE_PASSWORD` | Password keystore |
 | `SAMBA_USER` / `SAMBA_PASSWORD` | Credenciales SMB |
 | `SAMBA_HOST` / `SAMBA_SHARE` / `SAMBA_FOLDER` / `SAMBA_DOMAIN` | Conexión Samba |
+| `REDIS_HOST` | Host Redis (default: `localhost`) |
+| `REDIS_PORT` | Puerto Redis (default: `6379`) |
+| `REDIS_PASSWORD` | Password Redis (vacío si sin auth) |
+| `REDIS_DB` | Base de datos Redis (default: `0`) |
 
 ## Samba / Imágenes
 
@@ -395,4 +425,4 @@ Variables CSS clave para alertas:
 - Migrar `PasswordEncoder` de uppercase a BCrypt (requiere hashear claves en BD)
 - Redirect HTTP `8281` → HTTPS `8282`: bean `servletContainer()` en `SecurityConfig.java`
 - Agregar tests unitarios (actualmente 0 tests)
-- Eliminar o reproponer `AppUserDetailsService` — código muerto desde que `JwtAuthFilter` construye el `Authentication` directo desde claims JWT
+- Implementar refresh token para extender sesiones sin re-login
