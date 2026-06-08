@@ -48,7 +48,7 @@ public class AuthController {
                 String token = authHeader.substring(7);
                 String jti = jwtUtil.extractJti(token);
                 var ttl = jwtUtil.extractRemainingTtl(token);
-                if (!ttl.isZero()) {
+                if (jti != null && !ttl.isZero()) {
                     tokenBlacklistService.blacklist(jti, ttl);
                 }
             } catch (JwtException ignored) {

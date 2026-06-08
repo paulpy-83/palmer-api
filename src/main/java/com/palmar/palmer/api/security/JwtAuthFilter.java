@@ -34,7 +34,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             jwtUtil.extractValidUsername(token).ifPresent(username -> {
                 if (SecurityContextHolder.getContext().getAuthentication() == null) {
                     String jti = jwtUtil.extractJti(token);
-                    if (tokenBlacklistService.isBlacklisted(jti)) return;
+                    if (jti != null && tokenBlacklistService.isBlacklisted(jti)) return;
                     List<SimpleGrantedAuthority> authorities = jwtUtil.extractRoles(token).stream()
                             .map(SimpleGrantedAuthority::new)
                             .toList();
