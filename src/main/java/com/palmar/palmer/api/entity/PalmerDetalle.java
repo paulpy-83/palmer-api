@@ -3,36 +3,36 @@ package com.palmar.palmer.api.entity;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import org.hibernate.annotations.Formula;
 import org.hibernate.annotations.Immutable;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
 @Entity
-@Table(name = "VW_ARTICULOS_REST_API")
+@Table(name = "VW_PALMER_DETALLE")
 @Immutable
 @Getter
 @NoArgsConstructor
-@IdClass(ArticuloStockViewId.class)
-public class ArticuloStockView {
+public class PalmerDetalle {
 
     @Id
     @Column(name = "COD_ARTICULO", length = 5)
     private String codArticulo;
 
-    @Formula("TO_NUMBER(COD_ARTICULO)")
-    private Long codArticuloNumero;
-
     @Column(name = "DESC_ARTICULO", length = 100)
     private String articuloDes;
 
-    @Id
-    @Column(name = "COD_SUCURSAL", length = 5)
-    private String codSucursal;
+    @Column(name = "COD_BARRA", length = 50)
+    private String codBarra;
 
-    @Column(name = "DESC_SUCURSAL", length = 100)
-    private String sucursalDes;
+    @Column(name = "IMAGEN", length = 255)
+    private String imagen;
+
+    @Column(name = "COSTO_ULTIMO")
+    private BigDecimal costoUltimo;
+
+    @Column(name = "PRECIO_BASE")
+    private BigDecimal precioBase;
 
     @Column(name = "COD_EMPRESA", length = 5)
     private String codEmpresa;
@@ -61,20 +61,17 @@ public class ArticuloStockView {
     @Column(name = "DESC_UNIDAD_MEDIDA", length = 100)
     private String descUnidadMedida;
 
-    @Column(name = "COSTO_ULTIMO")
-    private BigDecimal costoUltimo;
-
-    @Column(name = "PRECIO_BASE")
-    private BigDecimal precioBase;
-
-    @Column(name = "NRO_LOTE", length = 15)
-    private String nroLote;
+    @Column(name = "CANT_DISPON_TOTAL")
+    private BigDecimal cantDisponTotal;
 
     @Column(name = "CANT_MINIMA")
     private BigDecimal cantMinima;
 
-    @Column(name = "CANT_DISPON")
-    private BigDecimal cantDispon;
+    @Column(name = "NRO_SUCURSALES")
+    private Integer nroSucursales;
+
+    @Column(name = "PRECIO_VENTA")
+    private BigDecimal precioVenta;
 
     @Column(name = "COD_PRECIO_FIJO", length = 5)
     private String codPrecioFijo;
@@ -84,14 +81,4 @@ public class ArticuloStockView {
 
     @Column(name = "FEC_VIGENCIA")
     private LocalDate fecVigencia;
-
-    @Column(name = "PRECIO_VENTA")
-    private BigDecimal precioVenta;
-
-    @Column(name = "IMAGEN", length = 255)
-    private String imagen;
-
-    @Column(name = "COD_BARRA", length = 50)
-    private String codBarra;
-
 }

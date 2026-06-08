@@ -11,237 +11,388 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Common Commands
 
 ```bash
-# Build
-./mvnw clean package
+# Build dev (copia .env → target/)
+./mvnw clean package -DskipTests
+
+# Build prod (build frontend + copia .env.prod → target/.env)
+./mvnw clean package -Pprod -DskipTests
 
 # Run
 ./mvnw spring-boot:run
-
-# Run all tests
-./mvnw test
-
-# Run a single test class
-./mvnw test -Dtest=PalmerApiApplicationTests
-
-# Dependency tree
-./mvnw dependency:tree
 ```
 
 On Windows use `mvnw.cmd` instead of `./mvnw`.
+
+## Perfiles Maven
+
+| Comando | Perfil | `.env` copiado | Frontend incluido |
+|---------|--------|----------------|-------------------|
+| `.\mvnw.cmd clean package` | `dev` (default) | `.env` | ❌ No |
+| `.\mvnw.cmd clean package -Pprod` | `prod` | `.env.prod` → `.env` | ✅ Sí |
+
+En prod el JAR sirve API REST + frontend estático desde `static/`.
 
 ## Architecture
 
 ```
 src/main/java/com/palmar/palmer/api/
-├── PalmerApiApplication.java          — entry point (@SpringBootApplication @EnableCaching)
+├── PalmerApiApplication.java   — @SpringBootApplication @EnableCaching
+│                                 @EnableSpringDataWebSupport(pageSerializationMode = VIA_DTO)
 ├── config/
-│   ├── CacheConfig.java               — Caffeine CacheManager (caches: imagenes, opciones-filtro)
-│   └── SambaProperties.java           — @ConfigurationProperties(prefix="samba")
+│   ├── CacheConfig.java        — Caffeine (imagenes, opciones-filtro, alertas)
+│   └── SambaProperties.java    — @ConfigurationProperties(prefix="samba")
 ├── controller/
-│   ├── AuthController.java            — POST /api/auth/login
-│   ├── ArticuloStockViewController.java — GET /api/stock/** (paginado) + GET /api/stock/opciones
-│   └── ArticuloImageController.java   — GET /api/articulos/{codArticulo}/imagen
+│   ├── AuthController.java           — POST /api/auth/login
+│   ├── PalmerDashboardController.java — /api/v2/stock/**
+│   ├── PalmerArticuloController.java  — /api/v2/articulos/**
+│   ├── PalmerAlertaController.java    — /api/v2/alertas
+│   └── SpaController.java             — SPA fallback → index.html
 ├── dto/
-│   ├── LoginRequestDTO.java
-│   ├── LoginResponseDTO.java
-│   ├── ArticuloStockViewDTO.java
-│   ├── CodigoDescDTO.java             — { codigo, descripcion } para opciones de filtro
-│   ├── OpcionesFiltroDTO.java         — { familias, lineas } respuesta de /api/stock/opciones
-│   └── ErrorResponseDTO.java
+│   ├── LoginRequestDTO / LoginResponseDTO
+│   ├── PalmerDashboardDTO      — cantDisponTotal, nroSucursales, nroCrit, nroBajo
+│   ├── PalmerDetalleDTO        — detalle completo artículo
+│   ├── PalmerStockSucursalDTO  — stock por sucursal con EstadoStock
+│   ├── PalmerAlertaDTO         — alerta por (artículo × sucursal) con EstadoStock y TipoAlerta
+│   ├── CodigoDescDTO / OpcionesFiltroDTO / ErrorResponseDTO
 ├── entity/
-│   ├── ArticuloStockView.java         — @Immutable, mapea la vista VW_ARTICULOS_REST_API
-│   ├── ArticuloStockViewId.java       — clave compuesta (codArticulo + codSucursal)
-│   └── Usuario.java                   — @Immutable, mapea la tabla USUARIOS (autenticación)
+│   ├── EstadoStock              — enum: ok | bajo | critico
+│   ├── TipoAlerta               — enum: reposicion | compra
+│   ├── PalmerDashboard          — VW_PALMER_DASHBOARD
+│   ├── PalmerDetalle            — VW_PALMER_DETALLE
+│   ├── PalmerStockSucursal / PalmerStockSucursalId — VW_PALMER_STOCK_SUCURSAL
+│   ├── PalmerAlerta             — VW_PALMER_ALERTAS (reutiliza PalmerStockSucursalId)
+│   └── Usuario
 ├── exception/
 │   ├── GlobalExceptionHandler.java
 │   └── ResourceNotFoundException.java
 ├── mapper/
-│   └── ArticuloStockViewMapper.java
+│   ├── PalmerDashboardMapper / PalmerDetalleMapper
+│   ├── PalmerStockSucursalMapper / PalmerAlertaMapper
 ├── repository/
-│   ├── ArticuloStockViewRepository.java — JpaRepository + JPQL para búsqueda y opciones de filtro
-│   └── UsuarioRepository.java           — JpaRepository<Usuario>, findByCodUsuarioAndEstado
+│   ├── PalmerDashboardRepository    — findAll paginado, filtros, búsqueda, opciones
+│   ├── PalmerDetalleRepository      — findByCodArticulo → Optional
+│   ├── PalmerStockSucursalRepository — findByCodArticuloOrderByCodSucursalAsc → List
+│   ├── PalmerAlertaRepository       — findAllOrdered → List (críticos primero)
+│   └── UsuarioRepository
 ├── security/
-│   ├── JwtUtil.java                   — generación y validación de tokens JWT (jjwt 0.12.6); claim "roles"
-│   ├── JwtAuthFilter.java             — OncePerRequestFilter para validar Bearer token
-│   ├── AppUserDetailsService.java     — UserDetailsService que carga usuarios desde Oracle (USUARIOS)
-│   └── SecurityConfig.java           — filtro STATELESS, CORS, PasswordEncoder (uppercase)
+│   ├── JwtUtil / JwtAuthFilter / OracleAuthenticationProvider / SecurityConfig
+│   └── AppUserDetailsService  — ⚠ código muerto (no invocado en el flujo actual)
 └── service/
-    ├── ArticuloStockViewService.java  — @Transactional(readOnly=true), orquesta repo + mapper
-    └── SambaService.java              — conexión SMB2 persistente con pool (ReentrantLock), caché Caffeine
+    ├── PalmerDashboardService   — findAll, filtros, search, getOpciones (@Cacheable)
+    ├── PalmerArticuloService    — findDetalle + findSucursales + findImagenFilename
+    ├── PalmerAlertaService      — findAll sin paginación (@Cacheable TTL 5 min), filtra nulls
+    └── SambaService             — SMB2 persistente + Caffeine cache
 ```
+
+## Vistas Oracle (VW_PALMER_*)
+
+| Vista | Cardinalidad | Propósito |
+|-------|-------------|-----------|
+| `VW_PALMER_DASHBOARD` | 1 fila / artículo | Listado paginado — `GROUP BY`, badges precalculados |
+| `VW_PALMER_DETALLE` | 1 fila / artículo | Detalle completo — header, imagen, rentabilidad |
+| `VW_PALMER_STOCK_SUCURSAL` | 1 fila / (artículo × sucursal) | Tab "Por Sucursal" — `EstadoStock` precalculado |
+| `VW_PALMER_ALERTAS` | Filas de alerta reposicion + fila compra por artículo | `UNION ALL` de dos bloques |
+
+Todas las vistas usan `COALESCE(CANT_MINIMA, 5)` — el valor por defecto de stock mínimo
+está definido en Oracle, no en el frontend.
+
+`ESTADO_STOCK` en `VW_PALMER_STOCK_SUCURSAL` y `VW_PALMER_ALERTAS` retorna los valores
+`'ok'`, `'bajo'`, `'critico'` que mapean directamente al enum `EstadoStock`.
+
+### VW_PALMER_ALERTAS — Lógica de dos bloques (UNION ALL)
+
+**Bloque 1 — reposicion:**
+- Filas de tiendas (excluye sucursal `05`) con stock bajo/crítico
+- Solo si el depósito `05` tiene `COALESCE(SUM(CANT_DISPON), 0) > 0` (subquery en `HAVING`)
+- `TIPO_ALERTA = 'reposicion'`
+
+**Bloque 2 — compra:**
+- Una fila por artículo representando al depósito `05`
+- Solo si `COALESCE(SUM(dep.CANT_DISPON), 0) <= 0` (subquery en `WHERE`)
+- Sin `LEFT JOIN` a `ST_EXISTENCIA_ART` — `COD_SUCURSAL` hardcodeado a `'05'`, `CANT_DISPON` a `0`
+- Cubre tanto artículos con registro en depósito (stock = 0) como sin registro (null → 0)
+- `TIPO_ALERTA = 'compra'`, `ESTADO_STOCK = 'critico'`
+
+**Reglas de negocio:**
+| Tienda | Depósito 05 | Alerta generada |
+|--------|-------------|-----------------|
+| bajo/crítico | stock > 0 | reposicion (fila de la tienda) |
+| bajo/crítico | stock = 0 o sin registro | compra (fila del depósito) |
+| OK | stock = 0 o sin registro | compra (fila del depósito) |
+| OK | stock > 0 | ninguna |
+| Depósito (05) | — | nunca aparece en reposicion |
+
+**Nota importante:** `PalmerAlertaService.findAll()` filtra `e != null && e.getCodArticulo() != null`
+antes de mapear, para prevenir NPE por filas null que Hibernate puede generar con LEFT JOINs vacíos.
 
 ## REST API Endpoints
 
 ### Auth (pública)
+| Método | Ruta |
+|--------|------|
+| POST | `/api/auth/login` |
+
+### Stock — VW_PALMER_DASHBOARD
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| POST | `/api/auth/login` | Retorna JWT token + `username` + `roles` |
+| GET | `/api/v2/stock` | Listado paginado, 1 fila/artículo |
+| GET | `/api/v2/stock/familia/{cod}` | Filtrar por familia |
+| GET | `/api/v2/stock/linea/{cod}` | Filtrar por línea |
+| GET | `/api/v2/stock/search?q=` | Búsqueda unificada |
+| GET | `/api/v2/stock/opciones` | Familias y líneas (`@Cacheable` 6h) |
 
-### Imágenes (requiere `Authorization: Bearer <token>`)
+### Artículos — VW_PALMER_DETALLE + VW_PALMER_STOCK_SUCURSAL
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/api/articulos/{codArticulo}/imagen` | Retorna imagen JPEG del artículo desde servidor Samba |
+| GET | `/api/v2/articulos/{cod}` | Detalle del artículo |
+| GET | `/api/v2/articulos/{cod}/sucursales` | Stock por sucursal |
+| GET | `/api/v2/articulos/{cod}/imagen` | Imagen desde Samba (`@Cacheable` 24h) |
 
-> Responde con `Cache-Control: public, max-age=86400` y `ETag` basado en el nombre de archivo. Soporta `If-None-Match` → `304 Not Modified`. Retorna `404` si el artículo no tiene imagen o el archivo no existe en el share.
-
-### Stock (requiere `Authorization: Bearer <token>`)
+### Alertas — VW_PALMER_ALERTAS
 | Método | Ruta | Descripción |
 |--------|------|-------------|
-| GET | `/api/stock` | Listado paginado completo |
-| GET | `/api/stock/articulo/{codArticulo}` | Filtrar por artículo (todas las sucursales) |
-| GET | `/api/stock/familia/{codFamilia}` | Filtrar por familia |
-| GET | `/api/stock/linea/{codLinea}` | Filtrar por línea |
-| GET | `/api/stock/search?nombre=` | Búsqueda por nombre (LIKE, min 2 chars) |
-| GET | `/api/stock/opciones` | Familias y líneas distintas para filtros del frontend |
+| GET | `/api/v2/alertas` | Alertas globales sin paginación (`@Cacheable` 5 min) |
 
-Paginación por defecto: `size=20`, `sort=codArticulo,ASC`. Soporta params `?page=&size=&sort=`.
+Paginación: `size=20`, `sort=codArticuloNumero,ASC`. `totalPages` correcto — pagina sobre artículos únicos.
+JWT requerido en todos los endpoints excepto `/api/auth/**`. La regla `/api/**` cubre `/api/v2/**`.
 
-## DTOs
+## Búsqueda unificada (`/api/v2/stock/search`)
 
-### LoginResponseDTO
-Respuesta de `POST /api/auth/login`.
+Detección automática en `PalmerDashboardService`:
 
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `token` | String | JWT Bearer token |
-| `username` | String | Nombre de usuario autenticado |
-| `roles` | `List<String>` | Roles del usuario (ej. `["ROLE_USER"]`) |
+| Condición | Interpretación | Query |
+|---|---|---|
+| Solo dígitos, longitud ≤ 5 | Código de artículo | `codArticulo = q` (exacto) |
+| Solo dígitos, longitud ≥ 6 | Código de barras | `codBarra = q` (exacto) |
+| Contiene letras | Descripción | `articuloDes LIKE '%q%'` |
+| Fallback | OR 3 campos | LIKE en los 3 campos |
 
-### ArticuloStockViewDTO
-Respuesta de endpoints de detalle y listado paginado (`/api/stock/**`).
+Caracteres especiales (`!`, `%`, `_`) escapados por `escapeLike()` en `PalmerDashboardService`.
 
-| Campo | Tipo | Columna vista |
-|-------|------|---------------|
-| `codArticulo` | String | COD_ARTICULO |
-| `articuloDes` | String | DESC_ARTICULO |
-| `codSucursal` | String | COD_SUCURSAL |
-| `sucursalDes` | String | DESC_SUCURSAL |
-| `codEmpresa` | String | COD_EMPRESA |
-| `codMarca` | String | COD_MARCA |
-| `descMarca` | String | DESC_MARCA |
-| `codFamilia` | String | COD_FAMILIA |
-| `familiaDes` | String | DESC_FAMILIA |
-| `codLinea` | String | COD_LINEA |
-| `lineaDes` | String | DESC_LINEA |
-| `codUnidadMedida` | String | COD_UNIDAD_MEDIDA |
-| `descUnidadMedida` | String | DESC_UNIDAD_MEDIDA |
-| `costoUltimo` | BigDecimal | COSTO_ULTIMO |
-| `precioBase` | BigDecimal | PRECIO_BASE |
-| `nroLote` | String | NRO_LOTE |
-| `cantMinima` | BigDecimal | CANT_MINIMA |
-| `cantDispon` | BigDecimal | CANT_DISPON |
-| `codPrecioFijo` | String | COD_PRECIO_FIJO |
-| `descListaPrecio` | String | DESC_LISTA_PRECIO |
-| `fecVigencia` | LocalDate | FEC_VIGENCIA |
-| `precioVenta` | BigDecimal | PRECIO_VENTA |
-| `codBarra` | String | COD_BARRA |
+## EstadoStock enum
 
-> `precioVenta` y `descListaPrecio` son informativos: Hibernate devuelve la primera fila que Oracle resuelva para el par `codArticulo + codSucursal` (sin filtrar por lista de precio).
+```java
+// com.palmar.palmer.api.entity.EstadoStock
+public enum EstadoStock { ok, bajo, critico }
+```
 
-### OpcionesFiltroDTO
-Respuesta de `GET /api/stock/opciones`. Listas de valores distintos para poblar los filtros del frontend.
+Mapeado con `@Enumerated(EnumType.STRING)` en `PalmerStockSucursal` y `PalmerAlerta`.
+El valor en Oracle (`CASE WHEN ... THEN 'critico'`) coincide exactamente con el nombre del enum.
+Serializado en JSON como string en minúsculas: `"estadoStock": "critico"`.
 
-| Campo | Tipo | Descripción |
-|-------|------|-------------|
-| `familias` | `List<CodigoDescDTO>` | Familias distintas, ordenadas por descripción |
-| `lineas` | `List<CodigoDescDTO>` | Líneas distintas, ordenadas por descripción |
+## TipoAlerta enum
 
-`CodigoDescDTO`: `{ codigo: String, descripcion: String }`
+```java
+// com.palmar.palmer.api.entity.TipoAlerta
+public enum TipoAlerta { reposicion, compra }
+```
 
-## Dependencies
+Mapeado con `@Enumerated(EnumType.STRING)` en `PalmerAlerta`.
+Serializado en JSON como string en minúsculas: `"tipoAlerta": "reposicion"`.
 
-| Artefacto | Versión | Propósito |
-|-----------|---------|-----------|
-| `spring-boot-starter-web` | BOM 4.0.6 | REST controllers |
-| `spring-boot-starter-data-jpa` | BOM | JPA + Hibernate 7 |
-| `spring-boot-starter-security` | BOM | Seguridad HTTP |
-| `spring-boot-starter-validation` | BOM | `@Valid`, constraints |
-| `spring-boot-starter-actuator` | BOM | Health/info endpoints |
-| `spring-boot-starter-cache` | BOM | Abstracción de caché (`@Cacheable`) |
-| `caffeine` | BOM | Implementación de caché en memoria (LRU, TTL) |
-| `ojdbc11` | 23.7.0.25.01 | Driver Oracle 12c+ |
-| `jjwt-api/impl/jackson` | 0.12.6 | JWT |
-| `dotenv-java` | 3.0.0 | Carga `.env` en local |
-| `smbj` | 0.13.0 | Cliente SMB2/Samba para acceso a imágenes |
-| `lombok` | BOM | Generación de código |
+## DTOs V2
+
+### PalmerDashboardDTO
+| Campo | Tipo |
+|-------|------|
+| `codArticulo` | String |
+| `articuloDes` | String |
+| `codBarra` | String |
+| `cantDisponTotal` | BigDecimal |
+| `cantMinima` | BigDecimal |
+| `nroSucursales` | Integer |
+| `nroCrit` | Integer |
+| `nroBajo` | Integer |
+| `precioVenta` | BigDecimal |
+
+### PalmerDetalleDTO
+Todos los campos de `PalmerDashboardDTO` + `imagen`, `costoUltimo`, `precioBase`,
+`descMarca`, `descListaPrecio`, `fecVigencia`, `nroSucursales`.
+
+### PalmerStockSucursalDTO
+| Campo | Tipo |
+|-------|------|
+| `codArticulo` / `codSucursal` | String |
+| `sucursalDes` / `codEmpresa` | String |
+| `cantDispon` / `cantMinima` / `cantMaxima` | BigDecimal |
+| `estadoStock` | EstadoStock |
+
+### PalmerAlertaDTO
+| Campo | Tipo |
+|-------|------|
+| `codArticulo` / `codSucursal` | String |
+| `articuloDes` / `sucursalDes` | String |
+| `codBarra` | String |
+| `codFamilia` / `familiaDes` | String |
+| `codLinea` / `lineaDes` | String |
+| `codUnidadMedida` / `descUnidadMedida` | String |
+| `cantDispon` / `cantMinima` | BigDecimal |
+| `estadoStock` | EstadoStock |
+| `tipoAlerta` | TipoAlerta |
+| `precioVenta` | BigDecimal |
+
+## Separación de responsabilidades
+
+### Controller → Service → Repository (regla estricta)
+- Los controllers **nunca** inyectan repositorios directamente.
+- `PalmerArticuloController` delega toda la lógica de datos a `PalmerArticuloService`:
+  - `findDetalle()` — detalle del artículo
+  - `findSucursales()` — stock por sucursal
+  - `findImagenFilename()` — nombre del archivo de imagen (lanza 404 si no existe)
+
+## Cache (Caffeine)
+
+| Cache | TTL | Max | Propósito |
+|-------|-----|-----|-----------|
+| `imagenes` | 24h | 500 | Bytes de imágenes desde Samba |
+| `opciones-filtro` | 6h | 1 | Familias y líneas para filtros |
+| `alertas` | 5 min | 1 | Lista completa de alertas globales |
+
+Todos los TTL configurables en `application.yaml` (`cache.*.ttl-*`).
 
 ## Persistence
 
 - **ORM:** Spring Data JPA + Hibernate 7, `OracleDialect`
-- **Pool:** HikariCP — dev: max 5 conex., prod: max 20 conex.
-- **fetch_size:** dev: 100, prod: 500 (reduce round-trips JDBC con Oracle)
-- **DDL:** `ddl-auto: none` — schema gestionado con scripts en `src/main/resources/db/oracle/`
-- **Vista Oracle:** `VW_ARTICULOS_REST_API` — entidad `@Immutable` con clave compuesta (`codArticulo + codSucursal`)
-
-## Cache (Caffeine)
-
-| Cache | Key | TTL | Max entradas | Propósito |
-|-------|-----|-----|--------------|-----------|
-| `imagenes` | filename | 24h | 500 | Bytes de imágenes descargadas desde Samba |
-| `opciones-filtro` | — | 6h | 1 | Familias y líneas distintas para filtros |
-
-TTL y tamaño fijos en `application.yaml` (`cache.imagenes.*`, `cache.opciones.*`).
+- **Pool:** HikariCP — dev: max 5, prod: max 20
+- **fetch_size prod:** 500
+- **DDL:** `ddl-auto: none`
+- **Ordenamiento numérico:** `@Formula("TO_NUMBER(COD_ARTICULO)")` → `codArticuloNumero`
+- **Paginación:** `@EnableSpringDataWebSupport(VIA_DTO)` en `PalmerApiApplication`
 
 ## Security
 
-- Autenticación **stateless** con JWT (Bearer token)
-- Usuarios cargados desde la tabla Oracle `USUARIOS` via `AppUserDetailsService`
-  - Solo usuarios con `ESTADO = 'A'` (activos) pueden autenticarse
-  - El rol se toma de la columna `COD_GRUPO` → `SimpleGrantedAuthority(codGrupo)`
-  - Contraseñas almacenadas en mayúsculas en `CLAVE_AUTORIZACION`; `PasswordEncoder` convierte a uppercase antes de comparar
-- El JWT incluye `subject` (username) y el claim `"roles"` (lista de authorities)
-- Ruta pública: `/api/auth/**`; el resto requiere token válido
-- CORS configurable via `CORS_ALLOWED_ORIGINS` (variable de entorno, requerida)
+- JWT stateless; `/api/auth/**` pública; todo `/api/**` requiere Bearer token. Expiración: **15 minutos** (`jwt.expiration-ms: 900000`)
+- Regla `requestMatchers("/api/**")` cubre tanto `/api/*` como `/api/v2/**`
+- **Autenticación:** `OracleAuthenticationProvider` valida credenciales directamente contra el motor Oracle via `DriverManager.getConnection(dbUrl, props)` con timeout de 5 s (`auth.datasource.connection-timeout`). Si la conexión tiene éxito, verifica que el usuario exista en `USUARIOS` con `ESTADO='A'` y carga el rol desde `COD_GRUPO`. La conexión se abre y cierra inmediatamente (try-with-resources) — no se mantiene ningún pool por usuario.
+- **AuthenticationManager:** `ProviderManager` explícito con `OracleAuthenticationProvider` como único proveedor. Solo interviene en el login — los requests JWT no pasan por aquí.
+- **AppUserDetailsService:** **Código muerto** — no es invocado por ningún componente activo. `JwtAuthFilter` construye el `Authentication` directamente desde los claims del JWT (username + roles) sin consultar la BD. Candidato a eliminar o reproponer.
+- `PasswordEncoder` actual: uppercase (texto plano) — ya no participa en el login. **Pendiente migrar a BCrypt.**
+- CORS via `CORS_ALLOWED_ORIGINS` (todos con `https://`)
 
-## Compresión HTTP
-
-Habilitada en todos los perfiles (`application.yaml` base):
-- `min-response-size: 1024` — no comprime respuestas < 1 KB
-- MIME types comprimidos: `application/json`, `application/javascript`, `text/css`, `text/plain`
-- Las imágenes JPEG no se comprimen (ya están comprimidas por naturaleza)
-
-## Resources
-
+### OracleAuthenticationProvider — flujo
 ```
-src/main/resources/
-├── application.yaml          — valores fijos (JWT 1h, caché TTL/max), compresión, credenciales via ${...}
-├── application-dev.yaml      — infraestructura dev (DB url, schema INV, Samba 10.30.1.3), pool reducido, SQL debug
-├── application-prod.yaml     — infraestructura prod via ${ENV_VAR}, pool ampliado, fetch_size=500, logs reducidos
-└── db/oracle/
-    └── V1__create_persona.sql
+POST /api/auth/login
+  → OracleAuthenticationProvider.authenticate()
+  → username.toUpperCase()
+  → DriverManager.getConnection(auth.datasource.url, {user, password, CONNECT_TIMEOUT=5s})
+      ← ORA-01017 / ORA-28000 → BadCredentialsException → 401
+      ← error inesperado → InternalAuthenticationServiceException → 500
+      ← OK → misma conexión abierta, se ejecuta SELECT en USUARIOS:
+              SELECT COD_USUARIO, COD_GRUPO, CLAVE_AUTORIZACION
+              FROM DB_SCHEMA.USUARIOS WHERE COD_USUARIO = ? AND ESTADO = 'A'
+              ← sin fila → DisabledException → 401
+              ← con fila → UsuarioInfo{codUsuario, codGrupo, claveAutorizacion}
+      (conexión se cierra al salir del try-with-resources)
+  → UserDetails{username=COD_USUARIO, roles=[COD_GRUPO], password=CLAVE_AUTORIZACION}
+  → UsernamePasswordAuthenticationToken(userDetails, null, [COD_GRUPO])
+  → AuthController: jwtUtil.generateToken(userDetails) → JWT{sub, roles, exp=now+15m}
+  → LoginResponseDTO{token, username, roles} → 200
+
+Prerequisito: GRANT SELECT ON DB_SCHEMA.USUARIOS TO <cada usuario Oracle de la app>
+OracleAuthenticationProvider NO depende de UsuarioRepository (eliminado del provider).
+
+Requests autenticados (JwtAuthFilter — sin consultar BD):
+  → extractValidUsername(token) → COD_USUARIO (desde claim "sub")
+  → extractRoles(token) → [COD_GRUPO] (desde claim "roles")
+  → UsernamePasswordAuthenticationToken(username, null, authorities) en SecurityContext
 ```
 
-### Estrategia de configuración
+## Estrategia de configuración
 
 | Tipo | Dónde |
 |------|-------|
-| Secretos (`DB_PASSWORD`, `JWT_SECRET`, `SAMBA_PASSWORD`, etc.) | `.env` (nunca commiteado) |
-| Infraestructura por ambiente (DB url, schema, Samba host/share) | `application-{dev\|prod}.yaml` |
-| Valores fijos no sensibles (JWT expiration, caché TTL/max) | `application.yaml` base |
+| Secretos | `.env` únicamente |
+| Infraestructura | `.env` (dev) / `.env.prod` (prod) |
+| Comportamiento por perfil | `application-{dev\|prod}.yaml` |
+| Valores fijos | `application.yaml` base |
 
 ## Environment Variables
 
-Solo secretos y control de entorno. Los valores de infraestructura (DB url, schema, Samba host/share/domain) se definen en los YAMLs de perfil.
-
 | Variable | Descripción |
 |----------|-------------|
-| `SPRING_PROFILES_ACTIVE` | Perfil activo (`dev` \| `prod`) |
-| `DB_USERNAME` | Usuario Oracle |
-| `DB_PASSWORD` | Contraseña Oracle |
-| `JWT_SECRET` | Clave secreta JWT (HS256) — generar con `openssl rand -base64 32` |
-| `CORS_ALLOWED_ORIGINS` | Orígenes CORS separados por coma (ej. `http://localhost:5173`) |
-| `SAMBA_USER` | Usuario para autenticar en el share SMB |
-| `SAMBA_PASSWORD` | Contraseña del usuario Samba |
-
-En desarrollo local definir estas variables en `.env` en la raíz del proyecto (cargado por `dotenv-java`).
-
-En producción `DB_HOST`, `DB_PORT`, `DB_SERVICE`, `DB_SCHEMA`, `SAMBA_HOST`, `SAMBA_SHARE`, `SAMBA_FOLDER`, `SAMBA_DOMAIN` deben setearse como variables de entorno reales del servidor (referenciadas en `application-prod.yaml`).
+| `SPRING_PROFILES_ACTIVE` | `dev` \| `prod` |
+| `DB_USERNAME` / `DB_PASSWORD` | Credenciales Oracle |
+| `DB_URL` | `jdbc:oracle:thin:@//host:port/service` |
+| `DB_SCHEMA` | Schema Oracle |
+| `JWT_SECRET` | Clave HS256 |
+| `CORS_ALLOWED_ORIGINS` | Orígenes separados por coma |
+| `SSL_ENABLED` | `true` para HTTPS |
+| `SSL_KEYSTORE_PATH` | dev: `classpath:palmer.p12` / prod: ruta absoluta |
+| `SSL_KEYSTORE_PASSWORD` | Password keystore |
+| `SAMBA_USER` / `SAMBA_PASSWORD` | Credenciales SMB |
+| `SAMBA_HOST` / `SAMBA_SHARE` / `SAMBA_FOLDER` / `SAMBA_DOMAIN` | Conexión Samba |
 
 ## Samba / Imágenes
 
-- El endpoint `GET /api/articulos/{codArticulo}/imagen` obtiene el nombre de archivo desde la columna `IMAGEN` de la vista Oracle.
-- **Pool de conexión:** `SambaService` mantiene una conexión SMB2 persistente (`Connection + Session + DiskShare`) reutilizada entre requests. Se protege con `ReentrantLock` para concurrencia. Reconecta automáticamente si la conexión cae (`ensureConnected()`). Se abre en `@PostConstruct` y se cierra en `@PreDestroy`.
-- **Caché en memoria:** los bytes de la imagen se guardan en Caffeine (`@Cacheable("imagenes")`). Cache miss: ~50–100ms (sin handshake SMB). Cache hit: < 1ms (RAM).
-- **Caché HTTP:** responde con `Cache-Control: public, max-age=86400` y `ETag` (hash del filename). Soporta `If-None-Match` → `304 Not Modified` sin body.
-- Si la columna `IMAGEN` está vacía o el archivo no existe en el share, retorna `404 Not Found`.
-- Requiere que la vista `VW_ARTICULOS_REST_API` incluya las columnas `IMAGEN` y `COD_BARRA`.
+- `PalmerArticuloService.findImagenFilename()` resuelve el nombre desde `VW_PALMER_DETALLE.IMAGEN`
+- Conexión SMB2 persistente con `ReentrantLock`. `@PostConstruct` / `@PreDestroy`.
+- Caché Caffeine + HTTP (`Cache-Control: max-age=86400` + `ETag` CRC32).
+- `computeEtag()` en `PalmerArticuloController` — CRC32 sobre bytes de la imagen.
+
+## HTTPS / SSL
+
+Servidor en **HTTPS** puerto `8282`, keystore PKCS12 generado con `mkcert`.
+
+```powershell
+mkcert -pkcs12 -p12-file palmer.p12 10.30.1.3 10.30.1.6 10.30.2.18 localhost 127.0.0.1
+```
+
+IPs: `10.30.1.3` (prod OL8), `10.30.1.6`, `10.30.2.18` (dev). Vence 1 sep 2028.
+
+| Perfil | `SSL_KEYSTORE_PATH` | `key-store` en YAML |
+|--------|---------------------|---------------------|
+| `dev` | `classpath:palmer.p12` | `${SSL_KEYSTORE_PATH}` |
+| `prod` | `/home/inventiva/Palmer/palmer.p12` | `file:${SSL_KEYSTORE_PATH}` |
+
+### Producción (Oracle Linux 8 — `10.30.1.3`)
+```
+/home/inventiva/Palmer/
+├── palmer-api-0.0.1-SNAPSHOT.jar
+├── .env
+├── palmer.p12
+└── rootCA.pem
+```
+
+## Frontend (palmer)
+
+- **React 19** + Vite 8, `react-router-dom` v7
+- **Dependencias:** `jspdf` (generación de PDFs en cliente)
+- Estructura: `src/api/`, `src/components/`, `src/hooks/`, `src/lib/`, `src/pages/`
+
+### Páginas principales
+| Página | Ruta | Descripción |
+|--------|------|-------------|
+| `LoginPage` | `/login` | Autenticación JWT |
+| `DashboardPage` | `/` | Listado paginado de stock con filtros |
+| `ArticleDetailPage` | `/article/:cod` | Detalle de artículo + stock por sucursal |
+| `AlertsPage` | `/alerts` | Alertas de reposición y compra |
+
+### AlertsPage — estructura
+- **Botón 🚚 Reposición** — genera PDF con artículos agrupados por sucursal (críticos primero)
+- **Botón 🛒 Compra** — genera PDF con artículos agrupados por familia + precio
+- Sección **Reposición desde depósito** — `BranchCard` por sucursal con badges crítico/bajo
+- Sección **Requieren compra** — card única con lista plana de artículos del depósito
+- Generación PDF via `src/lib/pdf-reports.js` (`generarPDFReposicion`, `generarPDFCompra`)
+
+### Iconos relevantes (`src/components/ui/icons.jsx`)
+| Ícono | Uso |
+|-------|-----|
+| `IcoTruck` | Header sección Reposición + botón PDF |
+| `IcoShoppingCart` | Header sección Compra + botón PDF |
+| `IcoMap` | Branch cards de sucursal |
+| `IcoBox` | Estado vacío |
+
+### Design system (`src/index.css`)
+Variables CSS clave para alertas:
+- `--accent` / `--accent-bg` / `--accent-ring` — azul primario (reposición)
+- `--crit-bg/fg/dot/ring` — rojo crítico
+- `--bajo-bg/fg/dot/ring` — naranja bajo
+- `--compra-bg/fg/ring` → `#fffbeb` / `#d97706` / `#fcd34d` (ámbar, compra)
+- Colores por sucursal: `--suc-1` a `--suc-5`
+
+## Pendientes
+
+- Migrar `PasswordEncoder` de uppercase a BCrypt (requiere hashear claves en BD)
+- Redirect HTTP `8281` → HTTPS `8282`: bean `servletContainer()` en `SecurityConfig.java`
+- Agregar tests unitarios (actualmente 0 tests)
+- Eliminar o reproponer `AppUserDetailsService` — código muerto desde que `JwtAuthFilter` construye el `Authentication` directo desde claims JWT

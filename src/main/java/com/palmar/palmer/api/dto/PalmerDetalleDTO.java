@@ -3,11 +3,13 @@ package com.palmar.palmer.api.dto;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 
-public record ArticuloStockViewDTO(
+public record PalmerDetalleDTO(
         String codArticulo,
         String articuloDes,
-        String codSucursal,
-        String sucursalDes,
+        String codBarra,
+        String imagen,
+        BigDecimal costoUltimo,
+        BigDecimal precioBase,
         String codEmpresa,
         String codMarca,
         String descMarca,
@@ -17,14 +19,11 @@ public record ArticuloStockViewDTO(
         String lineaDes,
         String codUnidadMedida,
         String descUnidadMedida,
-        BigDecimal costoUltimo,
-        BigDecimal precioBase,
-        String nroLote,
+        BigDecimal cantDisponTotal,
         BigDecimal cantMinima,
-        BigDecimal cantDispon,
+        Integer nroSucursales,
+        BigDecimal precioVenta,
         String codPrecioFijo,
         String descListaPrecio,
-        LocalDate fecVigencia,
-        BigDecimal precioVenta,
-        String codBarra
+        LocalDate fecVigencia
 ) {}

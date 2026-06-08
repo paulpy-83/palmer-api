@@ -21,6 +21,9 @@ public class CacheConfig {
     @Value("${cache.opciones.ttl-horas:6}")
     private int opcionesTtlHoras;
 
+    @Value("${cache.alertas.ttl-minutos:5}")
+    private int alertasTtlMinutos;
+
     @Bean
     public CacheManager cacheManager() {
         CaffeineCacheManager manager = new CaffeineCacheManager();
@@ -36,6 +39,14 @@ public class CacheConfig {
         manager.registerCustomCache("opciones-filtro",
             Caffeine.newBuilder()
                 .expireAfterWrite(opcionesTtlHoras, TimeUnit.HOURS)
+                .maximumSize(1)
+                .recordStats()
+                .build()
+        );
+
+        manager.registerCustomCache("alertas",
+            Caffeine.newBuilder()
+                .expireAfterWrite(alertasTtlMinutos, TimeUnit.MINUTES)
                 .maximumSize(1)   // resultado único — no varía por key
                 .recordStats()
                 .build()

@@ -37,3 +37,9 @@ build/
 .claude/
 Lib/
 *.log
+
+### SSL ###
+src/main/resources/palmer.p12
+
+### Prod ###
+.env.prod

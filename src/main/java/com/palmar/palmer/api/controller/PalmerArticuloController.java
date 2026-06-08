@@ -1,8 +1,9 @@
 package com.palmar.palmer.api.controller;
 
-import com.palmar.palmer.api.entity.ArticuloStockView;
+import com.palmar.palmer.api.dto.PalmerDetalleDTO;
+import com.palmar.palmer.api.dto.PalmerStockSucursalDTO;
 import com.palmar.palmer.api.exception.ResourceNotFoundException;
-import com.palmar.palmer.api.repository.ArticuloStockViewRepository;
+import com.palmar.palmer.api.service.PalmerArticuloService;
 import com.palmar.palmer.api.service.SambaService;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
@@ -14,41 +15,49 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.annotation.Validated;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestHeader;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
+import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.CRC32;
 
 @RestController
-@RequestMapping("/api/articulos")
+@RequestMapping("/api/v2/articulos")
 @RequiredArgsConstructor
 @Validated
-public class ArticuloImageController {
+public class PalmerArticuloController {
 
     @Value("${cache.imagenes.ttl-horas:24}")
     private int cacheTtlHoras;
 
-    private final ArticuloStockViewRepository repository;
+    private final PalmerArticuloService articuloService;
     private final SambaService sambaService;
 
+    /** Detalle completo del artículo (header + imagen + rentabilidad) */
+    @GetMapping("/{codArticulo}")
+    public PalmerDetalleDTO getDetalle(
+            @PathVariable @NotBlank @Size(max = 5) String codArticulo) {
+        return articuloService.findDetalle(codArticulo);
+    }
+
+    /** Stock por sucursal — tab "Por Sucursal" */
+    @GetMapping("/{codArticulo}/sucursales")
+    public List<PalmerStockSucursalDTO> getSucursales(
+            @PathVariable @NotBlank @Size(max = 5) String codArticulo) {
+        return articuloService.findSucursales(codArticulo);
+    }
+
+    /** Imagen del artículo desde Samba con caché HTTP (ETag + Cache-Control) */
     @GetMapping("/{codArticulo}/imagen")
     public ResponseEntity<byte[]> getImagen(
             @PathVariable @NotBlank @Size(max = 5) String codArticulo,
             @RequestHeader(value = HttpHeaders.IF_NONE_MATCH, required = false) String ifNoneMatch) {
 
-        String filename = repository.findFirstByCodArticuloOrderByCodSucursalAsc(codArticulo)
-                .map(ArticuloStockView::getImagen)
-                .filter(img -> img != null && !img.isBlank())
-                .orElseThrow(() -> new ResourceNotFoundException("Imagen", "codArticulo", codArticulo));
+        String filename = articuloService.findImagenFilename(codArticulo);
 
         byte[] bytes = sambaService.fetchImage(filename)
                 .orElseThrow(() -> new ResourceNotFoundException("Imagen", "archivo", filename));
 
-        // ETag basado en el contenido real — cambia si el archivo es reemplazado en Samba
         String etag = "\"" + computeEtag(bytes) + "\"";
 
         if (etag.equals(ifNoneMatch)) {
