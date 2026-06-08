@@ -1,5 +1,20 @@
-### 1. Login — obtener JWT
-POST http://localhost:8282/api/auth/login
+### ══════════════════════════════════════════════════════
+###  PALMER API — HTTP Tests
+###  Puerto: 8282 (HTTPS)
+###  Auth:   /api/auth/login  /api/auth/logout
+###  Stock:  /api/v2/stock/**
+###  Arts:   /api/v2/articulos/**
+###  Alerts: /api/v2/alertas
+###  JWT: HS256 · exp=15min · claim jti (UUID) — Redis blacklist activo
+### ══════════════════════════════════════════════════════
+
+
+### ══════════════════════════════════════════════════════
+###  AUTH
+### ══════════════════════════════════════════════════════
+
+### 1. Login — obtener JWT (payload incluye jti desde esta versión)
+POST https://10.30.1.3:8282/api/auth/login
 Content-Type: application/json
 
 {
@@ -8,32 +23,88 @@ Content-Type: application/json
 }
 
 ### --- Copiar el token de la respuesta y pegarlo en @token abajo ---
-@token = eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwYm9nYWRvIiwiaWF0IjoxNzgwMTg2MTQzLCJleHAiOjE3ODAyNzI1NDN9.m5fBzH2WCWxWDwHAKq1OMQ5pLviOgNoOIEmujzjxHjA
+@token = eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJQQk9HQURPIiwicm9sZXMiOlsiQURNSU4iXSwiaWF0IjoxNzgwODgwMzE3LCJleHAiOjE3ODA4ODEyMTd9.vDJT9N1SvmlXFZYvoeqBeWXomqasg9NuCce0xzFvmx8
 
-### 2. Todos los artículos (paginado)
-GET http://localhost:8080/api/stock?page=0&size=50
+
+### 2. Logout — revoca el JWT actual (jti → Redis blacklist con TTL restante)
+###    Respuesta esperada: 204 No Content
+###    Usar el mismo token del login; tras este request el token queda inválido
+POST https://10.30.1.3:8282/api/auth/logout
 Authorization: Bearer {{token}}
 
-### 3. Por artículo (todas las sucursales)
-GET http://localhost:8080/api/stock/articulo/00001?page=0&size=20
+
+### 3. Token revocado → 401 (verificar que el blacklist funciona)
+###    Ejecutar DESPUÉS del logout con el mismo token
+###    Respuesta esperada: 401 Unauthorized
+GET https://10.30.1.3:8282/api/v2/stock?page=0&size=5
 Authorization: Bearer {{token}}
 
-### 4. Por familia
-GET http://localhost:8080/api/stock/familia/006?page=0&size=20
+
+### ══════════════════════════════════════════════════════
+###  DASHBOARD — VW_PALMER_DASHBOARD
+###  1 fila por artículo · paginación correcta
+###  Campos clave: cantDisponTotal, nroSucursales, nroCrit, nroBajo
+### ══════════════════════════════════════════════════════
+
+### 4. Listado paginado completo
+GET https://localhost:8282/api/v2/stock?page=0&size=20
 Authorization: Bearer {{token}}
 
-### 5. Por línea
-GET http://localhost:8080/api/stock/linea/00001?page=0&size=20
+### 5. Página 2
+GET https://localhost:8282/api/v2/stock?page=1&size=20
 Authorization: Bearer {{token}}
 
-### 6. Búsqueda por nombre (mín. 2 caracteres)
-GET http://localhost:8080/api/stock/search?nombre=uhu&page=0&size=20
+### 6. Filtrar por familia
+GET https://localhost:8282/api/v2/stock/familia/006?page=0&size=20
 Authorization: Bearer {{token}}
 
-### 7. Opciones de filtro — familias y líneas distintas
-GET http://localhost:8080/api/stock/opciones
+### 7. Filtrar por línea
+GET https://localhost:8282/api/v2/stock/linea/00001?page=0&size=20
 Authorization: Bearer {{token}}
 
-### 8. Imagen de artículo (binario JPEG)
-GET http://localhost:8080/api/articulos/00025/imagen
+### 8. Búsqueda por descripción (contiene letras → LIKE)
+GET https://localhost:8282/api/v2/stock/search?q=silla&page=0&size=20
+Authorization: Bearer {{token}}
+
+### 9. Búsqueda por código de artículo (≤ 5 dígitos → exacto)
+GET https://localhost:8282/api/v2/stock/search?q=26&page=0&size=20
+Authorization: Bearer {{token}}
+
+### 10. Búsqueda por código de barras (≥ 6 dígitos → exacto)
+GET https://localhost:8282/api/v2/stock/search?q=7790001234567&page=0&size=20
+Authorization: Bearer {{token}}
+
+### 11. Opciones de filtro — familias y líneas (@Cacheable 6h)
+GET https://localhost:8282/api/v2/stock/opciones
+Authorization: Bearer {{token}}
+
+
+### ══════════════════════════════════════════════════════
+###  ARTÍCULOS — VW_PALMER_DETALLE + VW_PALMER_STOCK_SUCURSAL
+###  Detalle completo + stock por sucursal
+### ══════════════════════════════════════════════════════
+
+### 12. Detalle del artículo (header + rentabilidad + imagen path)
+GET https://localhost:8282/api/v2/articulos/26
+Authorization: Bearer {{token}}
+
+### 13. Stock por sucursal — estadoStock: ok | bajo | critico
+GET https://localhost:8282/api/v2/articulos/26/sucursales
+Authorization: Bearer {{token}}
+
+### 14. Imagen desde Samba — binario JPEG (@Cacheable 24h + ETag)
+GET https://localhost:8282/api/v2/articulos/26/imagen
+Authorization: Bearer {{token}}
+
+
+### ══════════════════════════════════════════════════════
+###  ALERTAS — VW_PALMER_ALERTAS
+###  Sin paginación · @Cacheable 5 min
+###  tipoAlerta: reposicion | compra
+###  estadoStock: bajo | critico
+###  COALESCE(CANT_MINIMA, 5) — umbral definido en Oracle
+### ══════════════════════════════════════════════════════
+
+### 15. Alertas globales — todos los artículos en alerta
+GET https://localhost:8282/api/v2/alertas
 Authorization: Bearer {{token}}
