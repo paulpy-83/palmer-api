@@ -45,3 +45,5 @@ src/main/resources/palmer.p12
 
 ### Prod ###
 .env.prod
+/report/auditoria-tecnica-2026-06-07.html
+/report/auditoria-tecnica-2026-06-07.pdf
