@@ -1,5 +1,6 @@
 package com.palmar.palmer.api.security;
 
+import io.jsonwebtoken.Claims;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -14,6 +15,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.List;
 
 @Slf4j
@@ -37,19 +39,23 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
         if (authHeader != null && authHeader.startsWith("Bearer ")) {
             String token = authHeader.substring(7);
-            jwtUtil.extractValidUsername(token).ifPresentOrElse(username -> {
+            jwtUtil.extractValidClaims(token).ifPresentOrElse(claims -> {
+                String username = claims.getSubject();
                 log.debug("[JWT-FILTER] Username extraído del token: {}", username);
                 if (SecurityContextHolder.getContext().getAuthentication() != null) {
                     log.debug("[JWT-FILTER] SecurityContext ya autenticado — skip");
                     return;
                 }
-                String jti = jwtUtil.extractJti(token);
+                String jti = claims.getId();
                 log.debug("[JWT-FILTER] jti extraído: {}", jti);
                 if (jti != null && tokenBlacklistService.isBlacklisted(jti)) {
                     log.debug("[JWT-FILTER] jti={} está en blacklist — request rechazado sin auth", jti);
                     return;
                 }
-                List<SimpleGrantedAuthority> authorities = jwtUtil.extractRoles(token).stream()
+                @SuppressWarnings("unchecked")
+                List<String> rolesList = (List<String>) claims.get("roles", List.class);
+                List<SimpleGrantedAuthority> authorities = (rolesList != null ? rolesList : Collections.<String>emptyList())
+                        .stream()
                         .map(SimpleGrantedAuthority::new)
                         .toList();
                 var authToken = new UsernamePasswordAuthenticationToken(username, null, authorities);

@@ -50,10 +50,14 @@ public class JwtUtil {
     }
 
     public Optional<String> extractValidUsername(String token) {
+        return extractValidClaims(token).map(Claims::getSubject);
+    }
+
+    public Optional<Claims> extractValidClaims(String token) {
         try {
             Claims claims = parseClaims(token);
             if (claims.getExpiration().after(new Date())) {
-                return Optional.of(claims.getSubject());
+                return Optional.of(claims);
             }
         } catch (JwtException | IllegalArgumentException ignored) {
         }
@@ -62,12 +66,20 @@ public class JwtUtil {
 
     @SuppressWarnings("unchecked")
     public List<String> extractRoles(String token) {
-        List<String> roles = (List<String>) parseClaims(token).get("roles", List.class);
-        return roles != null ? roles : Collections.emptyList();
+        try {
+            List<String> roles = (List<String>) parseClaims(token).get("roles", List.class);
+            return roles != null ? roles : Collections.emptyList();
+        } catch (JwtException | IllegalArgumentException ignored) {
+            return Collections.emptyList();
+        }
     }
 
     public String extractJti(String token) {
-        return parseClaims(token).getId();
+        try {
+            return parseClaims(token).getId();
+        } catch (JwtException | IllegalArgumentException ignored) {
+            return null;
+        }
     }
 
     public Duration extractRemainingTtl(String token) {
